@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Gold Collector Pro</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial Black', sans-serif; }
+        
+        #game-ui {
+            position: absolute; top: 20px; left: 20px; color: #fbff00;
+            font-size: 28px; font-weight: bold; text-shadow: 0 0 15px #fbff00;
+            z-index: 10;
+        }
+
+        /* Game Over Menu (No more alerts!) */
+        #game-over-screen {
+            position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.9);
+            display: none; flex-direction: column; align-items: center; 
+            justify-content: center; z-index: 1000;
+        }
+        #game-over-screen h1 { color: #ff00ff; font-size: 50px; text-shadow: 0 0 20px #ff00ff; margin-bottom: 10px; }
+
+        .play-btn {
+            padding: 15px 50px; font-size: 32px; background: #00f2ff; color: #000;
+            border: none; border-radius: 50px; cursor: pointer; font-weight: bold;
+            box-shadow: 0 0 30px #00f2ff; transition: 0.3s;
+        }
+        .play-btn:hover { transform: scale(1.1); box-shadow: 0 0 50px #00f2ff; }
+
+        /* Controls */
+        .controls {
+            position: absolute; bottom: 40px; width: 100%;
+            display: flex; justify-content: center; align-items: center; gap: 20px; z-index: 100;
+        }
+        .btn {
+            width: 75px; height: 75px; background: rgba(0,0,0,0.8);
+            border: 3px solid #00f2ff; border-radius: 50%; color: #00f2ff;
+            font-size: 26px; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 0 15px #00f2ff; cursor: pointer; user-select: none;
+        }
+        #jumpBtn { border-color: #ff00ff; color: #ff00ff; box-shadow: 0 0 15px #ff00ff; width: 95px; height: 95px; }
+    </style>
+</head>
+<body>
+
+    <div id="game-ui">GOLD: <span id="score">0</span></div>
+
+    <div id="game-over-screen">
+        <h1>GAME OVER</h1>
+        <div id="final-score" style="color: #fbff00; font-size: 24px; margin-bottom: 25px;"></div>
+        <button class="play-btn" onclick="location.reload()">PLAY</button>
+    </div>
+
+    <div class="controls">
+        <div id="leftBtn" class="btn">◀</div>
+        <div id="jumpBtn" class="btn">JUMP</div>
+        <div id="rightBtn" class="btn">▶</div>
+    </div>
+
+    <audio id="bgm" loop src="https://actions.google.com/sounds/v1/science_fiction/low_frequence_hum.ogg"></audio>
+    <audio id="sfx-jump" src="https://actions.google.com/sounds/v1/cartoon/boing.ogg"></audio>
+    <audio id="sfx-coin" src="https://actions.google.com/sounds/v1/cartoon/ding_ding_ding.ogg"></audio>
+    <audio id="sfx-hit" src="https://actions.google.com/sounds/v1/impacts/crash_metal.ogg"></audio>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.Fog(0x000000, 10, 45);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const light = new THREE.PointLight(0x00f2ff, 2, 60); light.position.set(0, 10, 5); scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+
+        const player = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x00f2ff, emissive: 0x00f2ff }));
+        player.position.y = 0.5; scene.add(player);
+
+        const road = new THREE.Mesh(new THREE.PlaneGeometry(15, 1000), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        road.rotation.x = -Math.PI / 2; scene.add(road);
+
+        camera.position.set(0, 4, 10); camera.lookAt(player.position);
+
+        let score = 0, speed = 0.45, isJumping = false, velocityY = 0, gravity = -0.016, moveDir = 0;
+        let items = [], gameActive = true;
+
+        const bgm = document.getElementById('bgm');
+        const jumpSfx = document.getElementById('sfx-jump');
+        const coinSfx = document.getElementById('sfx-coin');
+        const hitSfx = document.getElementById('sfx-hit');
+
+        // Buttons
+        document.getElementById('leftBtn').ontouchstart = () => moveDir = -1;
+        document.getElementById('rightBtn').ontouchstart = () => moveDir = 1;
+        window.ontouchend = () => moveDir = 0;
+        document.getElementById('jumpBtn').onclick = () => { if(!isJumping) { velocityY = 0.3; isJumping = true; jumpSfx.play(); } };
+
+        function createItem() {
+            if(!gameActive) return;
+            const isObs = Math.random() < 0.4;
+            const color = isObs ? 0xff0055 : 0xffd700;
+            const geo = isObs ? new THREE.BoxGeometry(1.2, 1.2, 1.2) : new THREE.SphereGeometry(0.4, 16, 16);
+            const obj = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.8 }));
+            obj.position.set((Math.random() - 0.5) * 12, 0.6, -60);
+            obj.userData = { isObs: isObs };
+            scene.add(obj); items.push(obj);
+        }
+
+        function update() {
+            if(!gameActive) return;
+            player.position.x += moveDir * 0.25;
+            player.position.x = Math.max(-6, Math.min(6, player.position.x));
+
+            velocityY += gravity; player.position.y += velocityY;
+            if(player.position.y <= 0.5) { player.position.y = 0.5; velocityY = 0; isJumping = false; }
+
+            items.forEach((it, i) => {
+                it.position.z += speed;
+                if(player.position.distanceTo(it.position) < 1.1) {
+                    if(it.userData.isObs) {
+                        gameActive = false; 
+                        hitSfx.play(); bgm.pause();
+                        document.getElementById('final-score').innerText = "SCORE: " + score;
+                        document.getElementById('game-over-screen').style.display = 'flex';
+                    } else {
+                        score += 10; document.getElementById('score').innerText = score;
+                        coinSfx.currentTime = 0; coinSfx.play();
+                        scene.remove(it); items.splice(i, 1);
+                    }
+                }
+                if(it.position.z > 15) { scene.remove(it); items.splice(i, 1); }
+            });
+
+            if(Math.random() < 0.04) createItem();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate); update(); renderer.render(scene, camera);
+        }
+        window.onclick = () => { if(gameActive) bgm.play(); };
+        animate();
+    </script>
+</body>
+</html>
